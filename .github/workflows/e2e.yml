@@ -7,6 +7,13 @@ on:
   merge_group:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: "Run the build with tmate debugging enabled (https://github.com/marketplace/actions/debugging-with-tmate)"
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -55,4 +62,8 @@ jobs:
           cargo nextest run \
             --locked \
             --workspace \
-            -E "package(odyssey-e2e-tests)"
+            -E "package(odyssey-e2e-tests)" --show-output
+
+      - name: Setup tmate session
+        if: always()
+        uses: mxschmitt/action-tmate@v3
