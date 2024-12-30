@@ -83,6 +83,57 @@ async fn test_wallet_api() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_wallet_api_signer_env() -> Result<(), Box<dyn std::error::Error>> {
+    if !ci_info::is_ci() {
+        return Ok(());
+    }
+
+    std::env::set_var(
+        "EXP1_SK",
+        "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690e",
+    );
+
+    let private_key_hex = std::env::var("EXP1_SK")
+        .expect("EXP1_SK environment variable not set");
+    let private_key_str = private_key_hex.strip_prefix("0x").unwrap_or(&private_key_hex);
+    let private_key = B256::from_str(private_key_str)
+        .map_err(|_| "Invalid EXP1_SK format. Expected a 32-byte hex string.")?;
+
+
+    let provider = ProviderBuilder::new().on_http(REPLICA_RPC.clone());
+    let signer = PrivateKeySigner::from_bytes(&private_key)
+        .map_err(|_| "Failed to create signer from the provided private key.")?;
+
+    let delegation_address = Address::from_str(
+        &std::env::var("DELEGATION_ADDRESS")
+            .unwrap_or_else(|_| "0x90f79bf6eb2c4f870365e785982e1f101e93b906".to_string()),
+    )
+    .unwrap();
+
+    let auth = Authorization {
+        chain_id: provider.get_chain_id().await?,
+        address: delegation_address,
+        nonce: provider.get_transaction_count(signer.address()).await?,
+    };
+
+    let signature = signer.sign_hash_sync(&auth.signature_hash())?;
+    let auth = auth.into_signed(signature);
+
+    let tx =
+        TransactionRequest::default().with_authorization_list(vec![auth]).with_to(signer.address());
+
+    let tx_hash: B256 = provider.client().request("wallet_sendTransaction", vec![tx]).await?;
+
+    let receipt = PendingTransactionBuilder::new(provider.clone(), tx_hash).get_receipt().await?;
+
+    assert!(receipt.status());
+
+    assert!(!provider.get_code_at(signer.address()).await?.is_empty());
+
+    Ok(())
+}
+
 // This is new endpoint `odyssey_sendTransaction`, upper test will be deprecate in the future.
 #[tokio::test]
 async fn test_new_wallet_api() -> Result<(), Box<dyn std::error::Error>> {
