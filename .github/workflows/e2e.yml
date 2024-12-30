@@ -55,4 +55,4 @@ jobs:
           cargo nextest run \
             --locked \
             --workspace \
-            -E "package(odyssey-e2e-tests)" --show-output
+            -E "package(odyssey-e2e-tests)"
