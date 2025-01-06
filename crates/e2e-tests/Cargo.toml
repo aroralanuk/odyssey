@@ -11,6 +11,7 @@ categories.workspace = true
 
 [dev-dependencies]
 odyssey-common.workspace = true
+odyssey-wallet = { path = "../wallet" }
 
 reth-primitives-traits.workspace = true
 reth-trie-common.workspace = true

@@ -4,7 +4,7 @@ use alloy::{
     eips::eip7702::Authorization,
     primitives::{b256, Address, B256},
     providers::{PendingTransactionBuilder, Provider, ProviderBuilder},
-    signers::SignerSync,
+    signers::{SignerSync, Signer},
 };
 use alloy_network::{TransactionBuilder, TransactionBuilder7702};
 use alloy_rpc_types::{Block, BlockNumberOrTag, EIP1186AccountProofResponse, TransactionRequest};
@@ -12,6 +12,7 @@ use alloy_signer_local::PrivateKeySigner;
 use reth_primitives_traits::Account;
 use reth_trie_common::{AccountProof, StorageProof};
 use url::Url;
+use odyssey_wallet::OdysseySigner;
 
 static REPLICA_RPC: LazyLock<Url> = LazyLock::new(|| {
     std::env::var("REPLICA_RPC")
@@ -102,8 +103,9 @@ async fn test_wallet_api_signer_env() -> Result<(), Box<dyn std::error::Error>> 
 
 
     let provider = ProviderBuilder::new().on_http(REPLICA_RPC.clone());
-    let signer = PrivateKeySigner::from_bytes(&private_key)
+    let local_signer = PrivateKeySigner::from_bytes(&private_key)
         .map_err(|_| "Failed to create signer from the provided private key.")?;
+    let signer = OdysseySigner::Local(local_signer);
 
     let delegation_address = Address::from_str(
         &std::env::var("DELEGATION_ADDRESS")
@@ -117,7 +119,7 @@ async fn test_wallet_api_signer_env() -> Result<(), Box<dyn std::error::Error>> 
         nonce: provider.get_transaction_count(signer.address()).await?,
     };
 
-    let signature = signer.sign_hash_sync(&auth.signature_hash())?;
+    let signature = signer.sign_hash(&auth.signature_hash()).await?;
     let auth = auth.into_signed(signature);
 
     let tx =
