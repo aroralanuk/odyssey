@@ -4,7 +4,7 @@ use alloy::{
     eips::eip7702::Authorization,
     primitives::{b256, Address, B256},
     providers::{PendingTransactionBuilder, Provider, ProviderBuilder},
-    signers::SignerSync,
+    signers::{SignerSync, Signer},
 };
 use alloy_network::{TransactionBuilder, TransactionBuilder7702};
 use alloy_rpc_types::{Block, BlockNumberOrTag, EIP1186AccountProofResponse, TransactionRequest};
@@ -12,19 +12,26 @@ use alloy_signer_local::PrivateKeySigner;
 use reth_primitives_traits::Account;
 use reth_trie_common::{AccountProof, StorageProof};
 use url::Url;
+use odyssey_wallet::{OdysseySigner, SignerOptions};
 
+// static REPLICA_RPC: LazyLock<Url> = LazyLock::new(|| {
+//     std::env::var("REPLICA_RPC")
+//         .expect("failed to get REPLICA_RPC env var")
+//         .parse()
+//         .expect("failed to parse REPLICA_RPC env var")
+// });
 static REPLICA_RPC: LazyLock<Url> = LazyLock::new(|| {
-    std::env::var("REPLICA_RPC")
-        .expect("failed to get REPLICA_RPC env var")
-        .parse()
-        .expect("failed to parse REPLICA_RPC env var")
+    "http://127.0.0.1:32785".parse().expect("failed to parse REPLICA_RPC env var")
 });
 
+// static SEQUENCER_RPC: LazyLock<Url> = LazyLock::new(|| {
+//     std::env::var("SEQUENCER_RPC")
+//         .expect("failed to get SEQUENCER_RPC env var")
+//         .parse()
+//         .expect("failed to parse SEQUENCER_RPC env var")
+// });
 static SEQUENCER_RPC: LazyLock<Url> = LazyLock::new(|| {
-    std::env::var("SEQUENCER_RPC")
-        .expect("failed to get SEQUENCER_RPC env var")
-        .parse()
-        .expect("failed to parse SEQUENCER_RPC env var")
+    "http://127.0.0.1:32778".parse().expect("failed to parse SEQUENCER_RPC env var")
 });
 
 #[tokio::test]
@@ -72,6 +79,8 @@ async fn test_wallet_api() -> Result<(), Box<dyn std::error::Error>> {
     let tx =
         TransactionRequest::default().with_authorization_list(vec![auth]).with_to(signer.address());
 
+    println!("tx: {:?}", tx);
+
     let tx_hash: B256 = provider.client().request("wallet_sendTransaction", vec![tx]).await?;
 
     let receipt = PendingTransactionBuilder::new(provider.clone(), tx_hash).get_receipt().await?;
@@ -79,6 +88,121 @@ async fn test_wallet_api() -> Result<(), Box<dyn std::error::Error>> {
     assert!(receipt.status());
 
     assert!(!provider.get_code_at(signer.address()).await?.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_wallet_api_signer_env() -> Result<(), Box<dyn std::error::Error>> {
+    // if !ci_info::is_ci() {
+    //     return Ok(());
+    // }
+
+    std::env::set_var(
+        "EXP1_SK",
+        "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690e",
+    );
+
+    let private_key_hex = std::env::var("EXP1_SK")
+        .expect("EXP1_SK environment variable not set");
+    let private_key_str = private_key_hex.strip_prefix("0x").unwrap_or(&private_key_hex);
+    let private_key = B256::from_str(private_key_str)
+        .map_err(|_| "Invalid EXP1_SK format. Expected a 32-byte hex string.")?;
+
+
+    let provider = ProviderBuilder::new().on_http(REPLICA_RPC.clone());
+    let local_signer = PrivateKeySigner::from_bytes(&private_key)
+        .map_err(|_| "Failed to create signer from the provided private key.")?;
+    let signer = OdysseySigner::Local(local_signer);
+
+    let delegation_address = Address::from_str(
+        &std::env::var("DELEGATION_ADDRESS")
+            .unwrap_or_else(|_| "0x90f79bf6eb2c4f870365e785982e1f101e93b906".to_string()),
+    )
+    .unwrap();
+
+    let auth = Authorization {
+        chain_id: provider.get_chain_id().await?,
+        address: delegation_address,
+        nonce: provider.get_transaction_count(signer.address()).await?,
+    };
+
+    let signature = signer.sign_hash(&auth.signature_hash()).await?;
+    let auth = auth.into_signed(signature);
+
+    let tx =
+        TransactionRequest::default().with_authorization_list(vec![auth]).with_to(signer.address());
+
+    let tx_hash: B256 = provider.client().request("wallet_sendTransaction", vec![tx]).await?;
+
+    let receipt = PendingTransactionBuilder::new(provider.clone(), tx_hash).get_receipt().await?;
+
+    assert!(receipt.status());
+
+    assert!(!provider.get_code_at(signer.address()).await?.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_wallet_api_signer_env_aws() -> Result<(), Box<dyn std::error::Error>> {
+    std::env::set_var(
+        "AWS_KMS_KEY_ID",
+        "8770812b-6f99-429f-9d98-d27b4d1d42f2",
+    );
+
+    let kms_key_id = std::env::var("AWS_KMS_KEY_ID")
+        .expect("AWS_KMS_KEY_ID must be set for this test");
+
+    let signer_options = SignerOptions {
+        secret_key: None,
+        aws_kms_key_id: Some(kms_key_id),
+        gcp_kms_key_ref: None,
+    };
+
+    let signer = OdysseySigner::load(
+        Some(1), 
+        signer_options,
+    )
+    .await
+    .expect("Failed to load OdysseySigner with AWS KMS");
+
+
+    let provider = ProviderBuilder::new().on_http(REPLICA_RPC.clone());
+
+    let delegation_address = Address::from_str(
+        &std::env::var("DELEGATION_ADDRESS")
+            .unwrap_or_else(|_| "0x90f79bf6eb2c4f870365e785982e1f101e93b906".to_string()),
+    )
+    .unwrap();
+
+    // let auth = Authorization {
+    //     chain_id: provider.get_chain_id().await?,
+    //     address: delegation_address,
+    //     nonce: provider.get_transaction_count(signer.address()).await?,
+    // };
+
+    let auth = Authorization {
+        chain_id: 1,
+        address: delegation_address,
+        nonce: 51,
+    };
+
+    let signature = signer.sign_hash(&auth.signature_hash()).await?;
+    let auth = auth.into_signed(signature);
+
+    println!("signature: {:?} and auth: {:?}", signature, auth);
+
+    // let tx =
+    //     TransactionRequest::default().with_authorization_list(vec![auth]).with_to(signer.address());
+
+    // let tx_hash: B256 = provider.client().request("wallet_sendTransaction", vec![tx]).await?;
+
+    // let receipt = PendingTransactionBuilder::new(provider.clone(), tx_hash).get_receipt().await?;
+
+    // assert!(receipt.status());
+
+    // assert!(!provider.get_code_at(signer.address()).await?.is_empty());
 
     Ok(())
 }

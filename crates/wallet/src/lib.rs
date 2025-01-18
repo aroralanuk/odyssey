@@ -39,6 +39,11 @@ use tracing::{trace, warn};
 use reth_optimism_rpc as _;
 use tokio::sync::Mutex;
 
+mod signer_options;
+
+pub use signer_options::{OdysseySigner, SignerOptions};
+
+
 /// An upstream is capable of estimating, signing, and propagating signed transactions for a
 /// specific chain.
 #[async_trait]

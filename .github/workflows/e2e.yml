@@ -52,7 +52,8 @@ jobs:
           echo "REPLICA_RPC=http://127.0.0.1:$REPLICA_EL_PORT" >> $GITHUB_ENV
       - name: Run E2E tests
         run: |
-          cargo nextest run \
+          cargo test \
             --locked \
             --workspace \
             -E "package(odyssey-e2e-tests)"
+
