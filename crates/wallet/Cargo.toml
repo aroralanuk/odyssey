@@ -31,6 +31,8 @@ thiserror.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+aws-config = "^1.5"
+aws-sdk-kms = "^1.5"
 
 metrics.workspace = true
 metrics-derive.workspace = true

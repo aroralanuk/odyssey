@@ -7,7 +7,11 @@ use alloy::network::TxSigner;
 use alloy::signers::Result;
 use alloy::signers::Signature;
 use alloy_primitives::Address;
+use aws_config::Region;
 use clap::Parser;
+
+use aws_config::BehaviorVersion;
+// use aws_sdk_kms::Client;
 
 use alloy_signer_aws::{AwsSigner, AwsSignerError};
 use alloy_signer_local::PrivateKeySigner;
@@ -26,6 +30,7 @@ pub struct SignerOptions {
 }
 
 
+#[derive(Debug)]
 pub enum OdysseySigner {
     Local(PrivateKeySigner),
     Aws(AwsSigner),
@@ -33,7 +38,7 @@ pub enum OdysseySigner {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum OdysseySignerError {
+pub enum OdysseySignerError {
     #[error("AWS Signer Error: {0}")]
     Aws(#[from] AwsSignerError),
 
@@ -45,6 +50,39 @@ enum OdysseySignerError {
 
     #[error("hex parse error: {0}")]
     Hex(#[from] hex::FromHexError),
+}
+
+impl OdysseySigner {
+    pub async fn load(chain_id: Option<ChainId>, signer_options: SignerOptions) -> std::result::Result<Self, OdysseySignerError> {
+        // TODO: Implement this
+        // if signer_options = Local, create a Local signer
+        // if signer_options = Aws, create an Aws signer
+        // if signer_options = Gcp, create a Gcp signer
+        // if signer_options = None, return an error
+
+        match (
+            signer_options.secret_key,
+            signer_options.aws_kms_key_id,
+            signer_options.gcp_kms_key_ref,
+        ) {
+            (Some(secret_key), None, None) => {
+                let signer = PrivateKeySigner::from_slice(secret_key.as_bytes())
+                .map_err(|e| OdysseySignerError::Local(e.into()))?;
+                Ok(OdysseySigner::Local(signer))
+            }
+            (None, Some(aws_kms_key_id), None) => {
+                let config = aws_config::defaults(BehaviorVersion::latest())
+                    // .region(Region::new("us-east-2"))
+                    .load().await;
+
+
+                let signer = AwsSigner::new(aws_sdk_kms::Client::new(&config), aws_kms_key_id, chain_id).await.map_err(|e| OdysseySignerError::Aws(e.into()))?;
+                Ok(OdysseySigner::Aws(signer))
+            }
+            _ => Err(OdysseySignerError::Local(alloy_signer_local::LocalSignerError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidInput, "No signer options provided")))),
+        }
+
+    }
 }
 
 #[async_trait]
